@@ -1,20 +1,17 @@
 package com.zlglassworks.glassbluetoothtest;
 
 import java.io.UnsupportedEncodingException;
-import java.util.Set;
 
 import ktlab.lib.connection.ConnectionCallback;
 import ktlab.lib.connection.ConnectionCommand;
 import ktlab.lib.connection.bluetooth.BluetoothConnection;
 import ktlab.lib.connection.bluetooth.ClientBluetoothConnection;
 import ktlab.lib.connection.bluetooth.ServerBluetoothConnection;
-import android.app.Activity;
-import android.bluetooth.BluetoothAdapter;
 import android.bluetooth.BluetoothDevice;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
-import android.graphics.BitmapFactory.Options;
 import android.os.Bundle;
+import android.support.v4.app.FragmentActivity;
 import android.util.Base64;
 import android.util.Log;
 import android.view.View;
@@ -23,18 +20,25 @@ import android.view.WindowManager;
 import android.widget.Button;
 import android.widget.ImageView;
 import android.widget.TextView;
+import android.widget.Toast;
 
-public class MainActivity extends Activity {
+import com.zlglassworks.glassbluetoothtest.DeviceSelectDialogFragment.BluetoothDevcieSelectListener;
+
+public class MainActivity extends FragmentActivity implements BluetoothDevcieSelectListener {
 
 	private static final String TAG = "GlassBluetoothRemoteDevice";
+	
+	private static final String DEVICE_SAVED_STATE = "device";
 
 	private BluetoothDevice mDevice;
 	private BluetoothConnection mSenderConnection;
 	private BluetoothConnection mListenerConnection;
 
-	private Button mButton;
 	private TextView mTextView;
+	private Button mSendTestButton;
+	private Button mConnectButton;
 	private ImageView mImageView;
+
 
 	public static final byte COMMAND_TEST = 1;
 
@@ -52,10 +56,11 @@ public class MainActivity extends Activity {
 		getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
 		
 		mTextView = (TextView) findViewById(R.id.text_view);
-		mButton = (Button) findViewById(R.id.button);
+		mSendTestButton = (Button) findViewById(R.id.send_test_button);
+		mConnectButton = (Button) findViewById(R.id.connect_to_bluetooth_button);
 		mImageView = (ImageView) findViewById(R.id.image_view);
 
-		mButton.setOnClickListener(new OnClickListener() {
+		mSendTestButton.setOnClickListener(new OnClickListener() {
 
 			@Override
 			public void onClick(View v) {
@@ -63,21 +68,45 @@ public class MainActivity extends Activity {
 				mSenderConnection.sendData(COMMAND_TEST, COMMAND_ID_1);
 			}
 		});
+		
+		mConnectButton.setOnClickListener(new OnClickListener() {
 
+			@Override
+			public void onClick(View v) {
+				Log.i(TAG, "showing selection dialog");
+				showSelectionDialog();
+			}
+		});
+
+		if (savedInstanceState != null) {
+			mDevice = savedInstanceState.getParcelable(DEVICE_SAVED_STATE);
+		}
 	}
 
 	@Override
 	protected void onStart() {
 		super.onStart();
-
-//		startBluetoothSender();
+		
 		startBluetoothListener();
 	}
 
 	@Override
+	protected void onSaveInstanceState(Bundle outState) {
+		super.onSaveInstanceState(outState);
+		
+		if (mDevice != null) {
+			outState.putParcelable(DEVICE_SAVED_STATE, mDevice);
+		}
+	}
+	
+	@Override
 	protected void onStop() {
-//		mSenderConnection.stopConnection();
-		mListenerConnection.stopConnection();
+		if (mSenderConnection != null) {
+			mSenderConnection.stopConnection();
+		}
+		if (mListenerConnection != null) {
+			mListenerConnection.stopConnection();
+		}
 
 		super.onStop();
 	}
@@ -132,10 +161,8 @@ public class MainActivity extends Activity {
 	}
 
 	private void startBluetoothSender() {
-		mDevice = getGlassDevice();
-
 		if (mDevice == null) {
-			mTextView.setText("No Glass found");
+			mTextView.setText("No Device");
 		} else {
 			mSenderConnection = new ClientBluetoothConnection(new ConnectionCallback() {
 
@@ -143,7 +170,7 @@ public class MainActivity extends Activity {
 				public void onConnectComplete() {
 					Log.i(TAG, "Client#onConnectComplete");
 					mTextView.setText("Connected to: '" + mDevice.getName() + "'");
-					mButton.setEnabled(true);
+					mSendTestButton.setEnabled(true);
 				}
 
 				@Override
@@ -151,7 +178,8 @@ public class MainActivity extends Activity {
 					Log.i(TAG, "Client#onConnectionFailed");
 					String name = mDevice.getName();
 					mTextView.setText("Failed to connect to: '" + name + "'");
-					mButton.setEnabled(false);
+					mSendTestButton.setEnabled(false);
+					mDevice = null;
 				}
 
 				@Override
@@ -168,15 +196,27 @@ public class MainActivity extends Activity {
 		}
 	}
 
-	private BluetoothDevice getGlassDevice() {
-		BluetoothAdapter mBluetoothAdapter = BluetoothAdapter.getDefaultAdapter();
-		Set<BluetoothDevice> pairedDevices = mBluetoothAdapter.getBondedDevices();
-
-		for (BluetoothDevice bt : pairedDevices) {
-			if (bt.getName().toLowerCase().contains("glass")) {
-				return bt;
-			}
+	// Device Selection
+	
+	private void showSelectionDialog() {
+		DeviceSelectDialogFragment newFragment = new DeviceSelectDialogFragment();
+        newFragment.show(getFragmentManager(), "dialog");
+    }
+	
+	//
+	
+	@Override
+	public void onDeviceSelected(BluetoothDevice device) {
+		mDevice = device;
+		if (mSenderConnection != null) {
+			mSenderConnection.stopConnection();
 		}
-		return null;
+		startBluetoothSender();
+	}
+
+	@Override
+	public void noBluetoothDevices() {
+		mDevice = null;
+		Toast.makeText(this, "No Bluetooth Devices", Toast.LENGTH_SHORT).show();
 	}
 }
