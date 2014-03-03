@@ -27,6 +27,9 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+        <activity
+            android:name="com.space150.android.glass.camerazoom.DeviceSelectActivity">
+            </activity>
     </application>
 
 </manifest>

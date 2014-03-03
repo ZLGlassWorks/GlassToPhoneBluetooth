@@ -8,12 +8,10 @@ import ktlab.lib.connection.ConnectionCallback;
 import ktlab.lib.connection.ConnectionCommand;
 import ktlab.lib.connection.bluetooth.ClientBluetoothConnection;
 import ktlab.lib.connection.bluetooth.ServerBluetoothConnection;
-
-import org.apache.http.entity.ByteArrayEntity;
-
 import android.app.Activity;
 import android.bluetooth.BluetoothAdapter;
 import android.bluetooth.BluetoothDevice;
+import android.content.Intent;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.ImageFormat;
@@ -35,6 +33,8 @@ import android.widget.Toast;
 public class MainActivity extends Activity implements GestureDetector.OnGestureListener, Camera.OnZoomChangeListener {
 	public static String TAG = "CameraZoom";
 
+	private static final int DEVICE_SELECT_RESQUEST_CODE = 14123;
+
 	public static float FULL_DISTANCE = 8000.0f;
 
 	private static final byte TEST_TYPE = 3;
@@ -42,7 +42,7 @@ public class MainActivity extends Activity implements GestureDetector.OnGestureL
 
 	private static final byte IMAGE_DATA = 42;
 	private static final int IMAGE_DATA_COMMAND_ID = 10;
-	
+
 	private static final byte STRING_DATA = 43;
 	private static final int STRING_DATA_COMMAND_ID = 11;
 
@@ -83,7 +83,7 @@ public class MainActivity extends Activity implements GestureDetector.OnGestureL
 	protected void onStart() {
 		super.onStart();
 
-		startBluetoothSender();
+		// startBluetoothSender();
 		// startBluetoothListener();
 	}
 
@@ -92,6 +92,7 @@ public class MainActivity extends Activity implements GestureDetector.OnGestureL
 		super.onResume();
 
 		mCamera = Camera.open();
+		configureCamera();
 		startPreview();
 	}
 
@@ -102,6 +103,7 @@ public class MainActivity extends Activity implements GestureDetector.OnGestureL
 
 		mCamera.release();
 		mCamera = null;
+		mCameraConfigured = false;
 		mInPreview = false;
 
 		super.onPause();
@@ -109,10 +111,30 @@ public class MainActivity extends Activity implements GestureDetector.OnGestureL
 
 	@Override
 	protected void onStop() {
-		// mListenerConnection.stopConnection();
-		mSenderConnection.stopConnection();
+		if (mListenerConnection != null) {
+			mListenerConnection.stopConnection();
+		}
+		if (mSenderConnection != null) {
+			mSenderConnection.stopConnection();
+		}
 
 		super.onStop();
+	}
+
+	@Override
+	protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+		super.onActivityResult(requestCode, resultCode, data);
+
+		if (requestCode == DEVICE_SELECT_RESQUEST_CODE) {
+			if (resultCode == Activity.RESULT_OK && data != null) {
+				BluetoothDevice device = data.getParcelableExtra(DeviceSelectActivity.BLUETOOT_DEVICE);
+
+				if (device != null) {
+					mDevice = device;
+					startBluetoothSender();
+				}
+			}
+		}
 	}
 
 	private void initPreview(int width, int height) {
@@ -124,52 +146,55 @@ public class MainActivity extends Activity implements GestureDetector.OnGestureL
 				Toast.makeText(MainActivity.this, t.getMessage(), Toast.LENGTH_LONG).show();
 			}
 
-			if (!mCameraConfigured) {
-				Camera.Parameters parameters = mCamera.getParameters();
-				parameters.setPreviewSize(640, 360); // hard coded the largest
-														// size for now
-				parameters.setPreviewFpsRange(30000, 30000);
-				mCamera.setParameters(parameters);
-				mCamera.setZoomChangeListener(this);
+			configureCamera();
+		}
+	}
 
-				Size previewSize = mCamera.getParameters().getPreviewSize();
-				int dataBufferSize = (int) (previewSize.height * previewSize.width * (ImageFormat
-						.getBitsPerPixel(mCamera.getParameters().getPreviewFormat()) / 8.0));
-				// int dataBufferSize = 262144;
-				Log.i(TAG, "Size is: " + dataBufferSize);
-				mCamera.addCallbackBuffer(new byte[dataBufferSize]);
-				mCamera.addCallbackBuffer(new byte[dataBufferSize]);
-				mCamera.addCallbackBuffer(new byte[dataBufferSize]);
-				mCamera.addCallbackBuffer(new byte[dataBufferSize]);
-				mCamera.addCallbackBuffer(new byte[dataBufferSize]);
+	private void configureCamera() {
+		if (!mCameraConfigured) {
+			Camera.Parameters parameters = mCamera.getParameters();
+			parameters.setPreviewSize(640, 360); // hard coded the largest
+													// size for now
+			parameters.setPreviewFpsRange(30000, 30000);
+			mCamera.setParameters(parameters);
+			mCamera.setZoomChangeListener(this);
 
-				mCamera.setPreviewCallbackWithBuffer(new Camera.PreviewCallback() {
-					private long timestamp = 0;
+			Size previewSize = mCamera.getParameters().getPreviewSize();
+			int dataBufferSize = (int) (previewSize.height * previewSize.width * (ImageFormat.getBitsPerPixel(mCamera
+					.getParameters().getPreviewFormat()) / 8.0));
+			// int dataBufferSize = 262144;
+			Log.i(TAG, "Size is: " + dataBufferSize);
+			mCamera.addCallbackBuffer(new byte[dataBufferSize]);
+			mCamera.addCallbackBuffer(new byte[dataBufferSize]);
+			mCamera.addCallbackBuffer(new byte[dataBufferSize]);
+			mCamera.addCallbackBuffer(new byte[dataBufferSize]);
+			mCamera.addCallbackBuffer(new byte[dataBufferSize]);
 
-					public synchronized void onPreviewFrame(byte[] data, Camera camera) {
-						// Log.i(TAG, "Time Gap = " +
-						// (System.currentTimeMillis() - timestamp));
-						timestamp = System.currentTimeMillis();
+			mCamera.setPreviewCallbackWithBuffer(new Camera.PreviewCallback() {
+				private long timestamp = 0;
 
-						if (mSendImage) {
-							Size previewSize = camera.getParameters().getPreviewSize();
-							YuvImage yuvimage = new YuvImage(data, ImageFormat.NV21, previewSize.width,
-									previewSize.height, null);
-							ByteArrayOutputStream baos = new ByteArrayOutputStream();
-							yuvimage.compressToJpeg(new Rect(0, 0, previewSize.width, previewSize.height), 100, baos);
+				public synchronized void onPreviewFrame(byte[] data, Camera camera) {
+					// Log.i(TAG, "Time Gap = " +
+					// (System.currentTimeMillis() - timestamp));
+					timestamp = System.currentTimeMillis();
 
-							Log.i(TAG, "Want to send image");
-							mSendImage = false;
-							sendImageData(baos.toByteArray());
-						}
+					if (mSendImage) {
+						Size previewSize = camera.getParameters().getPreviewSize();
+						YuvImage yuvimage = new YuvImage(data, ImageFormat.NV21, previewSize.width, previewSize.height,
+								null);
+						ByteArrayOutputStream baos = new ByteArrayOutputStream();
+						yuvimage.compressToJpeg(new Rect(0, 0, previewSize.width, previewSize.height), 100, baos);
 
-						camera.addCallbackBuffer(data);
-						return;
+						Log.i(TAG, "Want to send image");
+						mSendImage = false;
+						sendImageData(baos.toByteArray());
 					}
-				});
 
-				mCameraConfigured = true;
-			}
+					camera.addCallbackBuffer(data);
+					return;
+				}
+			});
+			mCameraConfigured = true;
 		}
 	}
 
@@ -231,7 +256,7 @@ public class MainActivity extends Activity implements GestureDetector.OnGestureL
 
 	@Override
 	public void onLongPress(MotionEvent e) {
-		// TODO Auto-generated method stub
+		startActivityForResult(new Intent(this, DeviceSelectActivity.class), DEVICE_SELECT_RESQUEST_CODE);
 	}
 
 	@Override
@@ -249,9 +274,9 @@ public class MainActivity extends Activity implements GestureDetector.OnGestureL
 	public boolean onSingleTapUp(MotionEvent e) {
 		Log.i(TAG, "Sending test packet");
 		// mSenderConnection.sendData(TEST_TYPE, TEST_ID);
-		mSendImage = true;
-		
-		String stringToSend = "Hey there nexus 5";
+		// mSendImage = true;
+
+		String stringToSend = "Hey there " + mDevice.getName();
 		byte[] base64;
 		try {
 			base64 = Base64.encode(stringToSend.getBytes("UTF-8"), Base64.DEFAULT);
@@ -271,6 +296,7 @@ public class MainActivity extends Activity implements GestureDetector.OnGestureL
 	// Bluetooth Helpers
 
 	private void sendBitmap(Bitmap bitmap) {
+		Log.i(TAG, "Sending bitmap data!!!");
 		ByteArrayOutputStream stream = new ByteArrayOutputStream();
 		bitmap.compress(Bitmap.CompressFormat.PNG, 100, stream);
 		sendImageData(stream.toByteArray());
@@ -318,8 +344,6 @@ public class MainActivity extends Activity implements GestureDetector.OnGestureL
 	}
 
 	private void startBluetoothSender() {
-		mDevice = getRemoteDevice();
-
 		if (mDevice == null) {
 			mStatusView.setText("No Device found");
 		} else {
